@@ -100,6 +100,7 @@ static int ortho = 0;
 static float fov = 65;
 static int suppress_char = 0;
 static int typing = 0;
+static int quit = 0;
 static char typing_buffer[MAX_TEXT_LENGTH] = {0};
 static int message_index = 0;
 static char messages[MAX_MESSAGES][MAX_TEXT_LENGTH] = {0};
@@ -1278,8 +1279,7 @@ void render_item(Attrib *attrib) {
     }
 }
 
-void render_text(
-    Attrib *attrib, int justify, float x, float y, float n, char *text)
+void render_text(Attrib *attrib, int justify, float x, float y, float n, char *text)
 {
     float matrix[16];
     set_matrix_2d(matrix, width, height);
@@ -1307,18 +1307,14 @@ void login() {
     char access_token[128] = {0};
     if (db_auth_get_selected(username, 128, identity_token, 128)) {
         printf("Contacting login server for username: %s\n", username);
-        if (get_access_token(
-            access_token, 128, username, identity_token))
-        {
+        if (get_access_token(access_token, 128, username, identity_token)) {
             printf("Successfully authenticated with the login server\n");
             client_login(username, access_token);
-        }
-        else {
+        } else {
             printf("Failed to authenticate with the login server\n");
             client_login("", "");
         }
-    }
-    else {
+    } else {
         printf("Logging in anonymously\n");
         client_login("", "");
     }
@@ -1366,10 +1362,12 @@ void on_key(GLFWwindow *window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_ESCAPE) {
         if (typing) {
             typing = 0;
-        }
-        else if (exclusive) {
+        } else if (exclusive) {
             exclusive = 0;
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        } else if (!exclusive) {
+            exclusive = 1;
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         }
     }
     if (key == GLFW_KEY_ENTER) {
@@ -1380,8 +1378,7 @@ void on_key(GLFWwindow *window, int key, int scancode, int action, int mods) {
                     typing_buffer[n] = '\r';
                     typing_buffer[n + 1] = '\0';
                 }
-            }
-            else {
+            } else {
                 typing = 0;
                 if (typing_buffer[0] == CRAFT_KEY_SIGN) {
                     Player *player = players;
@@ -1389,20 +1386,16 @@ void on_key(GLFWwindow *window, int key, int scancode, int action, int mods) {
                     if (hit_test_face(player, &x, &y, &z, &face)) {
                         set_sign(x, y, z, face, typing_buffer + 1);
                     }
-                }
-                else if (typing_buffer[0] == '/') {
+                } else if (typing_buffer[0] == '/') {
                     parse_command(typing_buffer, 1);
-                }
-                else {
+                } else {
                     client_talk(typing_buffer);
                 }
             }
-        }
-        else {
+        } else {
             if (mods & GLFW_MOD_SUPER) {
                 right_click = 1;
-            }
-            else {
+            } else {
                 left_click = 1;
             }
         }
@@ -1412,10 +1405,8 @@ void on_key(GLFWwindow *window, int key, int scancode, int action, int mods) {
         const char *buffer = glfwGetClipboardString(window);
         if (typing) {
             suppress_char = 1;
-            strncat(typing_buffer, buffer,
-                MAX_TEXT_LENGTH - strlen(typing_buffer) - 1);
-        }
-        else {
+            strncat(typing_buffer, buffer, MAX_TEXT_LENGTH - strlen(typing_buffer) - 1);
+        } else {
             parse_command(buffer, 0);
         }
     }
@@ -1538,7 +1529,7 @@ void create_window() {
         window_height = modes[mode_count - 1].height;
     }
     window = glfwCreateWindow(
-        window_width, window_height, "Craft", monitor, NULL);
+        window_width, window_height, GAME_TITLE, monitor, NULL);
 }
 
 void handle_mouse_input() {
@@ -1634,11 +1625,12 @@ void handle_movement(double dt) {
 
 void handle_clicks() {
     State *s = &players->state;
+    //destroy blocks
     if (left_click) {
         left_click = 0;
         int hx, hy, hz;
         int hw = hit_test(0, s->x, s->y, s->z, s->rx, s->ry, &hx, &hy, &hz);
-        if (hy > 0 && hy < 256 && is_destructable(hw)) {
+        if (hy > MIN_BUILD_HEIGHT && hy < MAX_BUILD_HEIGHT && is_destructable(hw)) {
             set_block(hx, hy, hz, 0);
             int above = get_block(hx, hy + 1, hz);
             if (is_plant(above)) {
@@ -1646,16 +1638,18 @@ void handle_clicks() {
             }
         }
     }
+    //place block
     if (right_click) {
         right_click = 0;
         int hx, hy, hz;
-        int hw = hit_test(1, s->x, s->y, s->z, s->rx, s->ry, &hx, &hy, &hz);
-        if (hy > 0 && hy < 256 && is_obstacle(hw)) {
+        int hit_block = hit_test(1, s->x, s->y, s->z, s->rx, s->ry, &hx, &hy, &hz);
+        if (hy > MIN_BUILD_HEIGHT && hy < MAX_BUILD_HEIGHT && is_obstacle(hit_block)) {
             if (!player_intersects_block(2, s->x, s->y, s->z, hx, hy, hz)) {
                 set_block(hx, hy, hz, items[item_index]);
             }
         }
     }
+    //clone block (switch to in items bank)
     if (middle_click) {
         middle_click = 0;
         int hx, hy, hz;
@@ -1756,6 +1750,8 @@ int main(int argc, char **argv) {
     //     WSADATA wsa_data;
     //     WSAStartup(MAKEWORD(2, 2), &wsa_data);
     // #endif
+
+    //seed the random function
     srand(time(NULL));
     rand();
 
@@ -2078,6 +2074,11 @@ int main(int argc, char **argv) {
         glfwSwapBuffers(window);
         glfwPollEvents();
         if (!typing && glfwGetKey(window, CRAFT_KEY_QUIT)) {
+            quit = 1;
+        }
+
+        //Exit the program
+        if (quit) {
             break;
         }
     }

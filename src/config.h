@@ -2,6 +2,7 @@
 #define _config_h_
 
 // app parameters
+#define GAME_TITLE "Craft, Modded"
 #define DEBUG 0
 #define FULLSCREEN 0
 #define WINDOW_WIDTH 1024
@@ -13,6 +14,11 @@
 #define USE_CACHE 1
 #define DAY_LENGTH 300
 #define INVERT_MOUSE 0
+
+
+// game options
+#define MAX_BUILD_HEIGHT 256
+#define MIN_BUILD_HEIGHT 0
 
 // rendering options
 #define SHOW_PLANTS 1
